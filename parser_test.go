@@ -105,6 +105,26 @@ func TestParser_ParseStatement(t *testing.T) {
 			},
 		},
 		{
+			s: `SELECT * FROM "name"`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.Wildcard{}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "name"}},
+			},
+		},
+		{
+			s: `SELECT * FROM "where"`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.Wildcard{}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "where"}},
+			},
+		},
+		{
 			s: `SELECT * FROM myseries GROUP BY *`,
 			stmt: &influxql.SelectStatement{
 				IsRawQuery: true,
@@ -188,6 +208,76 @@ func TestParser_ParseStatement(t *testing.T) {
 				IsRawQuery: true,
 				Fields: []*influxql.Field{
 					{Expr: &influxql.VarRef{Val: "foo.bar.baz"}, Alias: "foo"},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT name::tag FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "name", Type: influxql.Tag}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT where::field FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "where", Type: influxql.AnyField}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT "name"::tag FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "name", Type: influxql.Tag}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT "where"::field FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "where", Type: influxql.AnyField}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT "name" FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "name"}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT "where" FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "where"}},
+				},
+				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
+			},
+		},
+		{
+			s: `SELECT "from" FROM foo`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields: []*influxql.Field{
+					{Expr: &influxql.VarRef{Val: "from"}},
 				},
 				Sources: []influxql.Source{&influxql.Measurement{Name: "foo"}},
 			},
@@ -664,6 +754,36 @@ func TestParser_ParseStatement(t *testing.T) {
 					{Name: "field2"},
 				},
 				Limit: 10,
+			},
+		},
+
+		// SELECT statement with ORDER BY expression
+		{
+			s: `SELECT field1 FROM myseries ORDER BY field1 + '/' + field2 ASC, field3 DESC`,
+			stmt: &influxql.SelectStatement{
+				IsRawQuery: true,
+				Fields:     []*influxql.Field{{Expr: &influxql.VarRef{Val: "field1"}}},
+				Sources:    []influxql.Source{&influxql.Measurement{Name: "myseries"}},
+				SortFields: []*influxql.SortField{
+					{
+						Name: "field1 + '/' + field2",
+						Expr: &influxql.BinaryExpr{
+							Op: influxql.ADD,
+							LHS: &influxql.BinaryExpr{
+								Op:  influxql.ADD,
+								LHS: &influxql.VarRef{Val: "field1"},
+								RHS: &influxql.StringLiteral{Val: "/"},
+							},
+							RHS: &influxql.VarRef{Val: "field2"},
+						},
+						Ascending: true,
+					},
+					{
+						Name:      "field3",
+						Expr:      &influxql.VarRef{Val: "field3"},
+						Ascending: false,
+					},
+				},
 			},
 		},
 
@@ -3453,8 +3573,9 @@ func TestParser_ParseStatement(t *testing.T) {
 		{s: `SELECT field1 FROM myseries ORDER BY`, err: `found EOF, expected identifier, ASC, DESC at line 1, char 38`},
 		{s: `SELECT field1 FROM myseries ORDER BY /`, err: `found /, expected identifier, ASC, DESC at line 1, char 38`},
 		{s: `SELECT field1 FROM myseries ORDER BY 1`, err: `found 1, expected identifier, ASC, DESC at line 1, char 38`},
-		{s: `SELECT field1 FROM myseries ORDER BY time ASC,`, err: `found EOF, expected identifier at line 1, char 47`},
-		{s: `SELECT field1 FROM myseries ORDER BY time, field1`, err: `only ORDER BY time supported at this time`},
+		// {s: `SELECT field1 FROM myseries ORDER BY time ASC,`, err: `found EOF, expected identifier at line 1, char 47`},
+		// {s: `SELECT field1 FROM myseries ORDER BY time, field1`, err: `only ORDER BY time supported at this time`},
+		{s: `SELECT field1 FROM myseries ORDER BY time ASC,`, err: `found EOF, expected identifier, string, number, bool at line 1, char 47`},
 		{s: `SELECT field1 AS`, err: `found EOF, expected identifier at line 1, char 18`},
 		{s: `SELECT field1 FROM 12`, err: `found 12, expected identifier at line 1, char 20`},
 		{s: `SELECT 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 FROM myseries`, err: `unable to parse integer at line 1, char 8`},

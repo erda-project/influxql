@@ -463,12 +463,24 @@ func (p *Parser) ParseIdentList() ([]string, error) {
 
 // parseSegmentedIdents parses a segmented identifiers.
 // e.g.,  "db"."rp".measurement  or  "db"..measurement
-func (p *Parser) parseSegmentedIdents() ([]string, error) {
-	ident, err := p.ParseIdent()
-	if err != nil {
-		return nil, err
+func (p *Parser) parseSegmentedIdents() (idents []string, err error) {
+	// ident, err := p.ParseIdent()
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// idents = []string{ident}
+
+	// allow keyword, like name:tag, where::filed
+	var keyword bool
+	tok, pos, ident := p.ScanIgnoreWhitespace()
+	if tok == IDENT {
+		idents = []string{ident}
+	} else if keywordBeg < tok && tok < keywordEnd {
+		keyword = true
+		idents = []string{strings.ToLower(tok.String())}
+	} else {
+		return nil, newParseError(tokstr(tok, ident), []string{"identifier"}, pos)
 	}
-	idents := []string{ident}
 
 	// Parse remaining (optional) identifiers.
 	for {
@@ -491,8 +503,19 @@ func (p *Parser) parseSegmentedIdents() ([]string, error) {
 		}
 
 		// Parse the next identifier.
-		if ident, err = p.ParseIdent(); err != nil {
-			return nil, err
+		// if ident, err = p.ParseIdent(); err != nil {
+		// 	return nil, err
+		// }
+		tok, pos, ident = p.ScanIgnoreWhitespace()
+		if tok != IDENT {
+			if keywordBeg < tok && tok < keywordEnd {
+				keyword = true
+				ident = strings.ToLower(tok.String())
+			} else {
+				if !keyword {
+					return nil, newParseError(tokstr(tok, ident), []string{"identifier"}, pos)
+				}
+			}
 		}
 
 		idents = append(idents, ident)
@@ -502,7 +525,13 @@ func (p *Parser) parseSegmentedIdents() ([]string, error) {
 		msg := fmt.Sprintf("too many segments in %s", QuoteIdent(idents...))
 		return nil, &ParseError{Message: msg}
 	}
-
+	if keyword {
+		t, _, _ := p.Scan()
+		p.Unscan()
+		if t != DOUBLECOLON {
+			return nil, newParseError(tokstr(tok, ident), []string{"identifier"}, pos)
+		}
+	}
 	return idents, nil
 }
 
@@ -2437,9 +2466,9 @@ func (p *Parser) parseSortFields() (SortFields, error) {
 			return nil, err
 		}
 
-		if lit != "time" {
-			return nil, errors.New("only ORDER BY time supported at this time")
-		}
+		// if lit != "time" {
+		// 	return nil, errors.New("only ORDER BY time supported at this time")
+		// }
 
 		fields = append(fields, field)
 	// Parse error...
@@ -2464,9 +2493,9 @@ func (p *Parser) parseSortFields() (SortFields, error) {
 		fields = append(fields, field)
 	}
 
-	if len(fields) > 1 {
-		return nil, errors.New("only ORDER BY time supported at this time")
-	}
+	// if len(fields) > 1 {
+	// 	return nil, errors.New("only ORDER BY time supported at this time")
+	// }
 
 	return fields, nil
 }
@@ -2475,12 +2504,27 @@ func (p *Parser) parseSortFields() (SortFields, error) {
 func (p *Parser) parseSortField() (*SortField, error) {
 	field := &SortField{}
 
-	// Parse sort field name.
-	ident, err := p.ParseIdent()
+	// // Parse sort field name.
+	// ident, err := p.ParseIdent()
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// field.Name = ident
+
+	// Parse the expression first.
+	_, pos, _ := p.ScanIgnoreWhitespace()
+	p.Unscan()
+	expr, err := p.ParseExpr()
 	if err != nil {
 		return nil, err
 	}
-	field.Name = ident
+	var c validateField
+	Walk(&c, expr)
+	if c.foundInvalid {
+		return nil, fmt.Errorf("invalid operator %s in SELECT clause at line %d, char %d; operator is intended for WHERE clause", c.badToken, pos.Line+1, pos.Char+1)
+	}
+	field.Expr = expr
+	field.Name = expr.String()
 
 	// Check for optional ASC or DESC clause. Default is ASC.
 	tok, _, _ := p.ScanIgnoreWhitespace()
@@ -2755,6 +2799,20 @@ func (p *Parser) parseUnaryExpr() (Expr, error) {
 			return nil, newParseError(tokstr(tok0, lit0), []string{"identifier", "number", "duration", "("}, pos0)
 		}
 	default:
+		// try to parse Call or VarRef
+		if keywordBeg < tok && tok < keywordEnd {
+			if tok0, _, _ := p.Scan(); tok0 == LPAREN {
+				return p.parseCall(strings.ToLower(tok.String()))
+			}
+			p.Unscan() // Unscan the last token (wasn't an LPAREN)
+			p.Unscan() // Unscan the IDENT token
+
+			// Parse it as a VarRef.
+			ref, err := p.ParseVarRef()
+			if err == nil {
+				return ref, nil
+			}
+		}
 		return nil, newParseError(tokstr(tok, lit), []string{"identifier", "string", "number", "bool"}, pos)
 	}
 }

@@ -542,6 +542,9 @@ type SortField struct {
 	// Name of the field.
 	Name string
 
+	// support Order By expression
+	Expr Expr
+
 	// Sort order.
 	Ascending bool
 }
