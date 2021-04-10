@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 )
 
 // Scanner represents a lexical scanner for InfluxQL.
@@ -350,7 +351,9 @@ func (s *Scanner) scanDigits() string {
 func isWhitespace(ch rune) bool { return ch == ' ' || ch == '\t' || ch == '\n' }
 
 // isLetter returns true if the rune is a letter.
-func isLetter(ch rune) bool { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') }
+func isLetter(ch rune) bool {
+	return /*(ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')*/ unicode.IsLetter(ch)
+}
 
 // isDigit returns true if the rune is a digit.
 func isDigit(ch rune) bool { return (ch >= '0' && ch <= '9') }
